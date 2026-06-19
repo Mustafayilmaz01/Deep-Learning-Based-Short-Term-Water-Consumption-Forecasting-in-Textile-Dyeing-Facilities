@@ -1,0 +1,11 @@
+{
+  "RocketRegressor": {
+    "num_kernels": 2000
+  },
+  "LSTMFCNRegressor": {
+    "lstm_size": 8
+  },
+  "InceptionTime": {
+    "batch_size": 32
+  }
+}

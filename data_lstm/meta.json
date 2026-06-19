@@ -1,0 +1,46 @@
+{
+  "input_csv": "data\\fabrika_clean.csv",
+  "target_column": "W-Water",
+  "time_unit": "monthly",
+  "total_months": 144,
+  "date_range": [
+    "2011-01",
+    "2022-12"
+  ],
+  "window_months": 12,
+  "horizon_months": 1,
+  "n_samples": 132,
+  "n_features": 3,
+  "selected_x_indices": [
+    9,
+    10,
+    17
+  ],
+  "feature_columns": [
+    "TotalDyeingAmount",
+    "TotalPackingAmaount",
+    "YarnConsumptionPerKgGas"
+  ],
+  "train_ratio": 0.75,
+  "val_ratio": 0.16666666666666666,
+  "test_ratio": 0.08333333333333334,
+  "train_end_index": 108,
+  "val_end_index": 132,
+  "train_date_range": [
+    "2011-01",
+    "2019-12"
+  ],
+  "val_date_range": [
+    "2020-01",
+    "2021-12"
+  ],
+  "test_date_range": [
+    "2022-01",
+    "2022-12"
+  ],
+  "train_samples_after_windowing": 96,
+  "val_samples_after_windowing": 24,
+  "test_samples_after_windowing": 12,
+  "correlation_heatmap_computed_on": "training_data_only",
+  "correlation_heatmap_path": "data_lstm\\correlation_heatmap.pdf"
+}

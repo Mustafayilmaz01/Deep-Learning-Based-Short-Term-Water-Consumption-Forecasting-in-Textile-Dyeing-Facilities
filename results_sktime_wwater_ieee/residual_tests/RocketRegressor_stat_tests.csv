@@ -1,0 +1,2 @@
+model,ljung_box_stat_lag5,ljung_box_pvalue_lag5,autocorrelation_ok
+ROCKET,3.7439333436745965,0.5868398177287697,True

@@ -1,0 +1,2 @@
+model,ljung_box_stat_lag5,ljung_box_pvalue_lag5,autocorrelation_ok
+ARIMA,3.1113380007810236,0.6828255080806535,True

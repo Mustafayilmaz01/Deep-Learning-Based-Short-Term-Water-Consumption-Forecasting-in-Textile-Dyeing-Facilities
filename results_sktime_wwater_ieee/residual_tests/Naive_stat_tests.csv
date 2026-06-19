@@ -1,0 +1,2 @@
+model,ljung_box_stat_lag5,ljung_box_pvalue_lag5,autocorrelation_ok
+Naive,2.1041009448686143,0.8345612915856724,True

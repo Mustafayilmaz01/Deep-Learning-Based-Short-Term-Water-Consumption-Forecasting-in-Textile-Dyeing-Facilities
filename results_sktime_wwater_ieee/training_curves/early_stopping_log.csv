@@ -1,0 +1,3 @@
+model,epochs_trained
+LSTM-FCN,28
+InceptionTime,20
