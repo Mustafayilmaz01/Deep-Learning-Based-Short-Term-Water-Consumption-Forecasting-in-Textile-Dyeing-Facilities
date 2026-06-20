@@ -242,19 +242,6 @@ After running both steps the following key files are produced:
 
 ---
 
-## Citation
-
-If you use this code or dataset in your research, please cite:
-
-```bibtex
-@article{your_citation_key,
-  author    = {Author, Name and Co-Author, Name},
-  title     = {Monthly Industrial Wastewater Forecasting Using Deep Learning and Classical Methods},
-  journal   = {IEEE ...},
-  year      = {2025},
-  doi       = {10.xxxx/xxxxxx}
-}
-```
 
 ---
 
