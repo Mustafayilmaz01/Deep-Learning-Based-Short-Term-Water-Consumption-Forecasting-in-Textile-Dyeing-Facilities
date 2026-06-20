@@ -35,8 +35,8 @@ This repository benchmarks **9 forecasting models** — ranging from classical s
 
 | Split | Period | Raw months | Samples (W=12) |
 |-------|--------|-----------|----------------|
-| Train | Jan 2011 – Dec 2020 | 120 | 108 |
-| Validation | Jan 2021 – Dec 2021 | 12 | 12 |
+| Train | Jan 2011 – Dec 2019 | 108 | 96 |
+| Validation | Jan 2020 – Dec 2021 | 24 | 24 |
 | Test | Jan 2022 – Dec 2022 | 12 | 12 |
 
 ---
@@ -48,16 +48,16 @@ Test set performance (sorted by RMSE). Full tables are in `results_sktime_wwater
 | Rank | Model | RMSE | MAE | MAPE (%) | Train Time (s) |
 |------|-------|------|-----|----------|----------------|
 | 1 | **Random Forest** | 2,204.6 | 1,794.7 | 9.39 | 0.10 |
-| 2 | **LSTM-FCN** | 2,296.5 | 1,744.8 | 9.22 | 69.1 |
-| 3 | **XGBoost** | 2,582.6 | 1,773.2 | 9.46 | 0.02 |
-| 4 | InceptionTime | 2,701.9 | 2,181.6 | 11.52 | 105.8 |
-| 5 | ARIMA | 2,871.6 | 2,022.0 | 10.52 | 1.10 |
-| 6 | ROCKET | 4,137.4 | 3,194.7 | 17.06 | 15.8 |
-| 7 | Seasonal Naive | 4,177.1 | 3,652.0 | 18.86 | — |
-| 8 | SARIMA | 5,037.2 | 3,570.8 | 18.12 | 1.13 |
+| 2 | **XGBoost** | 2,582.6 | 1,773.2 | 9.46 | 0.02 |
+| 3 | **ARIMA** | 2,871.6 | 2,022.1 | 10.52 | 1.13 |
+| 4 | InceptionTime | 2,887.7 | 2,289.0 | 11.95 | 96.89 |
+| 5 | LSTM-FCN | 3,915.6 | 3,378.5 | 17.16 | 69.26 |
+| 6 | Seasonal Naive | 4,177.1 | 3,652.0 | 18.86 | — |
+| 7 | ROCKET | 4,245.8 | 3,452.3 | 18.31 | 15.39 |
+| 8 | SARIMA | 5,037.2 | 3,570.8 | 18.12 | 1.20 |
 | 9 | Naive | 5,941.5 | 5,642.3 | 28.92 | — |
 
-> LSTM-FCN achieved the lowest MAE among all models (1,744.8), while Random Forest achieved the lowest RMSE (2,204.6), making both strong candidates depending on the error criterion.
+> Random Forest achieved the lowest RMSE (2,204.6) and XGBoost the lowest MAE (1,773.2) among all models, making both strong candidates depending on the error criterion. InceptionTime (RMSE=2,887.7) was the best-performing deep learning model.
 
 ---
 
@@ -201,7 +201,7 @@ python run_sktime_from_prepared.py
 
 This script loads `data_lstm/`, runs hyperparameter tuning, trains all 9 models, computes metrics with bootstrap confidence intervals, runs residual tests, and saves all results and figures to `results_sktime_wwater_ieee/`.
 
-**Expected total runtime:** ~5–10 minutes on a modern CPU (dominated by InceptionTime at ~106 s and LSTM-FCN at ~69 s).
+**Expected total runtime:** ~5–10 minutes on a modern CPU (dominated by InceptionTime at ~97 s and LSTM-FCN at ~69 s).
 
 ### Optional — Regenerate correlation heatmaps only
 

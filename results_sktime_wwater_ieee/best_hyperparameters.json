@@ -6,6 +6,6 @@
     "lstm_size": 8
   },
   "InceptionTime": {
-    "batch_size": 32
+    "batch_size": 8
   }
 }

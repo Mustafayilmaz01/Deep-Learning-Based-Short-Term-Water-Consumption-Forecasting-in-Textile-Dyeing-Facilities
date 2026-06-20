@@ -1,0 +1,322 @@
+Microsoft Windows [Version 10.0.19045.6466]
+(c) Microsoft Corporation. Tüm hakları saklıdır.
+
+C:\Users\Mustafa\Desktop\Mustafa_Water_Forecasting>python run_sktime_from_prepared.py
+
+======================================================================
+DATA LOADING
+======================================================================
+X3d: (132, 3, 12)  |  y: (132,)  min=10222  max=38096
+Features: ['TotalDyeingAmount', 'TotalPackingAmaount', 'YarnConsumptionPerKgGas']  |  Final window: W=12
+
+======================================================================
+TRAIN / VALIDATION / TEST SPLIT
+======================================================================
+Train: 96 samples (2011-01 – 2019-12)
+Val  : 24 samples (2020-01 – 2021-12)
+Test : 12 samples (2022-01 – 2022-12)
+Leakage-free: scaler fit on train only | HP tuning on val only | final fit on train+val
+
+======================================================================
+NORMALIZATION
+======================================================================
+
+======================================================================
+MODEL DEFINITIONS
+======================================================================
+
+======================================================================
+TRAINING & HYPERPARAMETER SELECTION
+======================================================================
+
+======================================================================
+Model: ROCKET
+======================================================================
+
+======================================================================
+HYPERPARAMETER TUNING: ROCKET
+======================================================================
+  train=96 | val=24  [TEST SET NOT SEEN]
+
+  num_kernels: [500, 1000, 2000, 5000, 10000]
+    num_kernels=500 ...   [WARN] RocketRegressor: no Keras inner model – val_loss N/A
+val_RMSE=4412.29  val_MAE=3627.87  stopped@ep=?
+    num_kernels=1000 ...   [WARN] RocketRegressor: no Keras inner model – val_loss N/A
+val_RMSE=4595.36  val_MAE=3819.75  stopped@ep=?
+    num_kernels=2000 ...   [WARN] RocketRegressor: no Keras inner model – val_loss N/A
+val_RMSE=4232.43  val_MAE=3448.35  stopped@ep=?
+    num_kernels=5000 ...   [WARN] RocketRegressor: no Keras inner model – val_loss N/A
+val_RMSE=4430.89  val_MAE=3590.15  stopped@ep=?
+    num_kernels=10000 ...   [WARN] RocketRegressor: no Keras inner model – val_loss N/A
+val_RMSE=4246.91  val_MAE=3373.17  stopped@ep=?
+
+  Best: {'num_kernels': 2000}  val-RMSE: 4232.43
+  Final model: train+val=120 samples
+  HP grid: results_sktime_wwater_ieee\hyperparameter_plots\RocketRegressor_tuning.png
+
+  ROCKET – VALIDATION: RMSE=1949.35  MAE=1297.06  MAPE=6.7557%  MASE=0.5280  RMSSE=0.6104
+  ROCKET – TEST:       RMSE=4245.84  MAE=3452.29  MAPE=18.3098%  MASE=1.3414  RMSSE=1.1837
+
+  ROCKET done.
+
+======================================================================
+Model: LSTM-FCN
+======================================================================
+
+======================================================================
+HYPERPARAMETER TUNING: LSTM-FCN
+======================================================================
+  train=96 | val=24  [TEST SET NOT SEEN]
+
+  lstm_size: [4, 8]
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 7ms/step
+val_RMSE=7471.82  val_MAE=6079.41  stopped@ep=67
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 6ms/step
+val_RMSE=6059.32  val_MAE=5112.04  stopped@ep=31
+
+  batch_size: [8, 16]
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 6ms/step
+val_RMSE=6059.32  val_MAE=5112.04  stopped@ep=31
+2/2 ━━━━━━━━━━━━━━━━━━━━ 0s 188ms/step
+val_RMSE=6382.48  val_MAE=5466.58  stopped@ep=46
+
+  Best: {'lstm_size': 8}  val-RMSE: 6059.32
+  Final model: train+val=120 samples
+  HP grid: results_sktime_wwater_ieee\hyperparameter_plots\LSTMFCNRegressor_tuning.png
+  Loss curve: results_sktime_wwater_ieee\training_curves\LSTMFCNRegressor_epoch_loss_curve.png
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 7ms/step
+2/2 ━━━━━━━━━━━━━━━━━━━━ 0s 188ms/step
+  Trainable params: 268,297
+
+  LSTM-FCN – VALIDATION: RMSE=2837.93  MAE=2284.58  MAPE=11.2872%  MASE=0.9301  RMSSE=0.8887
+  LSTM-FCN – TEST:       RMSE=3915.62  MAE=3378.49  MAPE=17.1630%  MASE=1.3127  RMSSE=1.0916
+
+  Multi-seed (best_params={'lstm_size': 8}, seeds=[42, 123, 7, 99, 2024])...
+2/2 ━━━━━━━━━━━━━━━━━━━━ 0s 142ms/step
+    seed=42: RMSE=3915.62  MAE=3378.49 <- Table III seed
+2/2 ━━━━━━━━━━━━━━━━━━━━ 0s 146ms/step
+    seed=123: RMSE=2536.89  MAE=2315.80
+2/2 ━━━━━━━━━━━━━━━━━━━━ 0s 222ms/step
+    seed=7: RMSE=4013.65  MAE=3271.27
+2/2 ━━━━━━━━━━━━━━━━━━━━ 0s 141ms/step
+    seed=99: RMSE=5832.14  MAE=4415.10
+2/2 ━━━━━━━━━━━━━━━━━━━━ 0s 143ms/step
+    seed=2024: RMSE=4060.13  MAE=3714.60
+
+  LSTM-FCN done.
+
+======================================================================
+Model: InceptionTime
+======================================================================
+
+======================================================================
+HYPERPARAMETER TUNING: InceptionTime
+======================================================================
+  train=96 | val=24  [TEST SET NOT SEEN]
+
+  batch_size: [8, 16, 32, 64]
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 9ms/step
+val_RMSE=4348.06  val_MAE=3389.24  stopped@ep=50
+2/2 ━━━━━━━━━━━━━━━━━━━━ 1s 262ms/step
+val_RMSE=11987.37  val_MAE=11358.48  stopped@ep=17
+1/1 ━━━━━━━━━━━━━━━━━━━━ 0s 391ms/step
+val_RMSE=12171.21  val_MAE=11587.29  stopped@ep=17
+1/1 ━━━━━━━━━━━━━━━━━━━━ 0s 365ms/step
+val_RMSE=12189.27  val_MAE=11594.28  stopped@ep=18
+
+  Best: {'batch_size': 8}  val-RMSE: 4348.06
+  Final model: train+val=120 samples
+  HP grid: results_sktime_wwater_ieee\hyperparameter_plots\InceptionTime_tuning.png
+  Loss curve: results_sktime_wwater_ieee\training_curves\InceptionTime_epoch_loss_curve.png
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 10ms/step
+2/2 ━━━━━━━━━━━━━━━━━━━━ 0s 382ms/step
+  Trainable params: 492,225
+
+  InceptionTime – VALIDATION: RMSE=3994.81  MAE=3296.81  MAPE=16.2425%  MASE=1.3422  RMSSE=1.2510
+  InceptionTime – TEST:       RMSE=2887.67  MAE=2289.04  MAPE=11.9463%  MASE=0.8894  RMSSE=0.8050
+
+  Multi-seed (best_params={'batch_size': 8}, seeds=[42, 123, 7, 99, 2024])...
+2/2 ━━━━━━━━━━━━━━━━━━━━ 1s 266ms/step
+    seed=42: RMSE=2887.67  MAE=2289.04 <- Table III seed
+2/2 ━━━━━━━━━━━━━━━━━━━━ 1s 264ms/step
+    seed=123: RMSE=1978.49  MAE=1575.56
+2/2 ━━━━━━━━━━━━━━━━━━━━ 1s 273ms/step
+    seed=7: RMSE=2074.35  MAE=1713.59
+2/2 ━━━━━━━━━━━━━━━━━━━━ 1s 284ms/step
+    seed=99: RMSE=2971.63  MAE=2414.19
+2/2 ━━━━━━━━━━━━━━━━━━━━ 1s 389ms/step
+    seed=2024: RMSE=4115.42  MAE=3698.82
+
+  InceptionTime done.
+  Combined loss curves: results_sktime_wwater_ieee\training_curves\all_dl_models_training_curves.png
+
+======================================================================
+BASELINE MODELS
+======================================================================
+
+  Naive ...
+
+  Naive – VALIDATION: RMSE=8761.95  MAE=8145.67  MAPE=35.1917%  MASE=3.3162  RMSSE=2.7439
+  Naive – TEST:       RMSE=5941.53  MAE=5642.33  MAPE=28.9245%  MASE=2.1924  RMSSE=1.6564
+  Naive done.
+
+  Seasonal Naive ...
+
+  Seasonal Naive – VALIDATION: RMSE=7619.24  MAE=6338.00  MAPE=28.6793%  MASE=2.5803  RMSSE=2.3860
+  Seasonal Naive – TEST:       RMSE=4177.05  MAE=3652.00  MAPE=18.8602%  MASE=1.4190  RMSSE=1.1645
+  Seasonal Naive done.
+
+  ARIMA ...
+    ARIMA best order (AIC): (1, 1, 1)
+    ARIMA best order (AIC): (1, 1, 1)
+
+  ARIMA – VALIDATION: RMSE=4445.07  MAE=2980.89  MAPE=13.4717%  MASE=1.2136  RMSSE=1.3920
+  ARIMA – TEST:       RMSE=2871.59  MAE=2022.05  MAPE=10.5166%  MASE=0.7857  RMSSE=0.8005
+  ARIMA done.
+
+  SARIMA ...
+
+  SARIMA – VALIDATION: RMSE=5603.15  MAE=3622.80  MAPE=16.6841%  MASE=1.4749  RMSSE=1.7547
+  SARIMA – TEST:       RMSE=5037.18  MAE=3570.75  MAPE=18.1246%  MASE=1.3874  RMSSE=1.4043
+  SARIMA done.
+
+  Random Forest ...
+
+  Random Forest – VALIDATION: RMSE=5269.16  MAE=4870.18  MAPE=22.5547%  MASE=1.9827  RMSSE=1.6501
+  Random Forest – TEST:       RMSE=2204.55  MAE=1794.73  MAPE=9.3913%  MASE=0.6973  RMSSE=0.6146
+  Random Forest done.
+
+  XGBoost ...
+
+  XGBoost – VALIDATION: RMSE=5092.19  MAE=4518.42  MAPE=20.9489%  MASE=1.8395  RMSSE=1.5947
+  XGBoost – TEST:       RMSE=2582.57  MAE=1773.21  MAPE=9.4637%  MASE=0.6890  RMSSE=0.7200
+  XGBoost done.
+
+======================================================================
+SWEEP PLOTS  [validation only]
+======================================================================
+  Early stopping – LSTM-FCN: 31 epochs
+  Early stopping – InceptionTime: 50 epochs
+
+  Batch size sweep (DL)...
+
+  LSTM-FCN | batch_size: [8, 16, 32, 64]
+3/3 ━━━━━━━━━━━━━━━━━━━━ 1s 6ms/step
+RMSE=5516.45
+2/2 ━━━━━━━━━━━━━━━━━━━━ 1s 291ms/step
+RMSE=7416.48
+1/1 ━━━━━━━━━━━━━━━━━━━━ 0s 158ms/step
+RMSE=11609.10
+1/1 ━━━━━━━━━━━━━━━━━━━━ 0s 171ms/step
+RMSE=11412.15
+
+  InceptionTime | batch_size: [8, 16, 32, 64]
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 12ms/step
+RMSE=6874.37
+2/2 ━━━━━━━━━━━━━━━━━━━━ 1s 269ms/step
+RMSE=9388.56
+1/1 ━━━━━━━━━━━━━━━━━━━━ 0s 415ms/step
+RMSE=5008.69
+1/1 ━━━━━━━━━━━━━━━━━━━━ 0s 287ms/step
+RMSE=7189.84
+  Sweep: results_sktime_wwater_ieee\training_curves\all_models_batch_rmse_mae.png
+
+  Window size sweep (DL)...
+
+  ROCKET | window: [6, 12, 18, 24, 36]
+    w=6: RMSE=4479.16
+    w=12: RMSE=4482.26
+    w=18: RMSE=5749.89
+    w=24: RMSE=5874.34
+    w=36: RMSE=7027.31
+
+  LSTM-FCN | window: [6, 12, 18, 24, 36]
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 108ms/step
+    w=6: RMSE=8356.13
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 73ms/step
+    w=12: RMSE=7513.53
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 102ms/step
+    w=18: RMSE=8476.33
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 78ms/step
+    w=24: RMSE=5957.58
+3/3 ━━━━━━━━━━━━━━━━━━━━ 0s 123ms/step
+    w=36: RMSE=6691.72
+
+  InceptionTime | window: [6, 12, 18, 24, 36]
+3/3 ━━━━━━━━━━━━━━━━━━━━ 1s 139ms/step
+    w=6: RMSE=6745.97
+3/3 ━━━━━━━━━━━━━━━━━━━━ 1s 288ms/step
+    w=12: RMSE=10522.67
+3/3 ━━━━━━━━━━━━━━━━━━━━ 1s 134ms/step
+    w=18: RMSE=5299.78
+3/3 ━━━━━━━━━━━━━━━━━━━━ 1s 143ms/step
+    w=24: RMSE=9103.04
+3/3 ━━━━━━━━━━━━━━━━━━━━ 1s 160ms/step
+    w=36: RMSE=6407.35
+
+  Window size sweep (RF, XGBoost)...
+
+  Random Forest | window: [6, 12, 18, 24, 36]
+    w=6: RMSE=4611.33
+    w=12: RMSE=5363.29
+    w=18: RMSE=5401.94
+    w=24: RMSE=5362.50
+    w=36: RMSE=5411.35
+
+  XGBoost | window: [6, 12, 18, 24, 36]
+    w=6: RMSE=4663.66
+    w=12: RMSE=5362.91
+    w=18: RMSE=5392.65
+    w=24: RMSE=5438.88
+    w=36: RMSE=5462.57
+  Sweep: results_sktime_wwater_ieee\training_curves\all_models_window_rmse_mae.png
+
+======================================================================
+COMBINED PLOTS
+======================================================================
+  All-models single: results_sktime_wwater_ieee\combined_plots\all_models_test_single_plot.png
+  All-models subplot: results_sktime_wwater_ieee\combined_plots\all_models_test_subplots_with_ci.png
+  Error boxplot: results_sktime_wwater_ieee\combined_plots\all_models_error_boxplot.png
+  Parity grid: results_sktime_wwater_ieee\combined_plots\combined_parity_all_models.png
+  Seed variance: results_sktime_wwater_ieee\combined_plots\multi_seed_variance.png
+
+======================================================================
+SAVE RESULTS
+======================================================================
+results_test.csv saved
+results_validation.csv saved
+computation_times.csv saved
+multi_seed_results.csv saved
+
+======================================================================
+SUMMARY
+======================================================================
+Final window: W=12  |  Seed: 42  |  Output: results_sktime_wwater_ieee/
+
+==========================================================================================
+VALIDATION PERFORMANCE (sorted by RMSE):
+==========================================================================================
+ 1. ROCKET             RMSE=1949.35  MAE=1297.06  MAPE=6.7557%  MASE=0.528  RMSSE=0.610
+ 2. LSTM-FCN           RMSE=2837.93  MAE=2284.58  MAPE=11.2872%  MASE=0.930  RMSSE=0.889
+ 3. InceptionTime      RMSE=3994.81  MAE=3296.81  MAPE=16.2425%  MASE=1.342  RMSSE=1.251
+ 4. ARIMA              RMSE=4445.07  MAE=2980.89  MAPE=13.4717%  MASE=1.214  RMSSE=1.392
+ 5. XGBoost            RMSE=5092.19  MAE=4518.42  MAPE=20.9489%  MASE=1.840  RMSSE=1.595
+ 6. Random Forest      RMSE=5269.16  MAE=4870.18  MAPE=22.5547%  MASE=1.983  RMSSE=1.650
+ 7. SARIMA             RMSE=5603.15  MAE=3622.80  MAPE=16.6841%  MASE=1.475  RMSSE=1.755
+ 8. Seasonal Naive     RMSE=7619.24  MAE=6338.00  MAPE=28.6793%  MASE=2.580  RMSSE=2.386
+ 9. Naive              RMSE=8761.95  MAE=8145.67  MAPE=35.1917%  MASE=3.316  RMSSE=2.744
+
+==========================================================================================
+TEST PERFORMANCE (sorted by RMSE) — reported AFTER final model selection:
+==========================================================================================
+ 1. Random Forest      RMSE=2204.55  MAE=1794.73  MAPE=9.3913%  MASE=0.697  RMSSE=0.615  TrainT=0.10s
+ 2. XGBoost            RMSE=2582.57  MAE=1773.21  MAPE=9.4637%  MASE=0.689  RMSSE=0.720  TrainT=0.02s
+ 3. ARIMA              RMSE=2871.59  MAE=2022.05  MAPE=10.5166%  MASE=0.786  RMSSE=0.801  TrainT=1.13s
+ 4. InceptionTime      RMSE=2887.67  MAE=2289.04  MAPE=11.9463%  MASE=0.889  RMSSE=0.805  TrainT=96.89s
+ 5. LSTM-FCN           RMSE=3915.62  MAE=3378.49  MAPE=17.1630%  MASE=1.313  RMSSE=1.092  TrainT=69.26s
+ 6. Seasonal Naive     RMSE=4177.05  MAE=3652.00  MAPE=18.8602%  MASE=1.419  RMSSE=1.164  TrainT=0.00s
+ 7. ROCKET             RMSE=4245.84  MAE=3452.29  MAPE=18.3098%  MASE=1.341  RMSSE=1.184  TrainT=15.39s
+ 8. SARIMA             RMSE=5037.18  MAE=3570.75  MAPE=18.1246%  MASE=1.387  RMSSE=1.404  TrainT=1.20s
+ 9. Naive              RMSE=5941.53  MAE=5642.33  MAPE=28.9245%  MASE=2.192  RMSSE=1.656  TrainT=0.00s
+
+C:\Users\Mustafa\Desktop\Mustafa_Water_Forecasting>

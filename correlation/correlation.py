@@ -6,8 +6,8 @@ import seaborn as sns
 # fabrika_clean.csv dosyasının kod ile aynı dizinde olduğu varsayılmaktadır.
 df = pd.read_csv("fabrika_clean.csv")
 
-# İlk 132 ay Train verisi (Ocak 2011 - Aralık 2021)
-df_train = df.iloc[:132].copy()
+# İlk 132 ay Train verisi (Ocak 2011 - Aralık 2019)
+df_train = df.iloc[:108].copy()
 
 # Korelasyon hesabına katılmaması için tarih sütunlarını çıkarıyoruz
 cols_to_drop = ["Year", "Month"]
@@ -26,7 +26,7 @@ plt.figure(figsize=(18, 14))
 sns.heatmap(corr_all, annot=True, fmt=".2f", cmap="coolwarm", center=0, 
             vmin=-1, vmax=1, annot_kws={"size": 10}, square=True, linewidths=.5)
 
-plt.title("Correlation Heatmap - All Features\n(Train Data Only: Jan 2011 - Dec 2021)", 
+plt.title("Correlation Heatmap - All Features\n(Train Data Only: Jan 2011 - Dec 2019)", 
           fontsize=16, fontweight='bold', pad=20)
 plt.xticks(rotation=45, ha='right', fontsize=12)
 plt.yticks(rotation=0, fontsize=12)

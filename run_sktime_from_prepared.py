@@ -662,6 +662,15 @@ def tune_model(cls, base_kw, grid, Xtr, ytr_sc, yscaler, name, Xva, yva_sc, Xtrv
             kw = {**base_kw, pn: v}
             if "callbacks" in kw: kw["callbacks"]=[cb for cb in [_make_es()] if cb]
             try:
+                # ── Her HP denemesi aynı başlangıç koşulunda değerlendirilsin ──
+                # Böylece HP farkı ölçülür, rastlantısallık değil (reproducible tuning)
+                try:
+                    import tensorflow as _tf_tune
+                    _tf_tune.random.set_seed(RANDOM_SEED)
+                except Exception: pass
+                np.random.seed(RANDOM_SEED)
+                _random.seed(RANDOM_SEED)
+                # ────────────────────────────────────────────────────────────────
                 print(f"    {pn}={v} ...", end=" ", flush=True)
                 m=cls(**kw); t0=time.time()
                 h_t = fit_capture(m, Xtr, ytr_sc, val_data=(Xva, yva_sc))
@@ -675,7 +684,15 @@ def tune_model(cls, base_kw, grid, Xtr, ytr_sc, yscaler, name, Xva, yva_sc, Xtrv
                     best_score=rmse; best_params={pn:v}
                     kw2=dict(kw)
                     if "callbacks" in kw2: kw2["callbacks"]=[cb for cb in [_make_es()] if cb]
-                    t0=time.time(); bc=cls(**kw2)
+                    # ── Seed sabitlenir: final model Table III ile tutarlı olsun ──
+                    try:
+                        import tensorflow as _tf2
+                        _tf2.random.set_seed(RANDOM_SEED)
+                    except Exception: pass
+                    np.random.seed(RANDOM_SEED)
+                    _random.seed(RANDOM_SEED)
+                    # ─────────────────────────────────────────────────────────────
+                    t0=time.time(); bc=cls(**{**kw2,"random_state":RANDOM_SEED})
                     h_f = fit_capture(bc, Xtrva, ytrva_sc, val_data=None)
                     total_t += time.time()-t0
                     hp = h_t if (h_t and h_t.get("val_loss")) else h_f
@@ -893,21 +910,30 @@ for name,cfg in models.items():
                         all_val_predictions,all_ci,all_ci_val,OUTPUT_DIR)
 
     if name in {"LSTMFCNRegressor","InceptionTime"} and N_SEEDS>1:
-        bkw2={**bkw,**best_p}; print(f"\n  Multi-seed (best_params={best_p})...")
-        for seed in SEEDS:
+        bkw2={**bkw,**best_p}
+        # RANDOM_SEED zaten Table III final modeli ile aynı seed.
+        # SEEDS listesinde yoksa başa ekliyoruz ki tablolar tutarlı olsun.
+        seeds_to_run = SEEDS if RANDOM_SEED in SEEDS else [RANDOM_SEED] + SEEDS
+        print(f"\n  Multi-seed (best_params={best_p}, seeds={seeds_to_run})...")
+        for seed in seeds_to_run:
             try:
                 try: import tensorflow as tf2; tf2.random.set_seed(seed)
                 except: pass
-                np.random.seed(seed)
-                if "callbacks" in bkw2: bkw2["callbacks"]=[cb for cb in [_make_es()] if cb]
-                ms=cls(**{**bkw2,"random_state":seed}); ms.fit(Xtrva_n,ytrva_sc)
+                np.random.seed(seed); _random.seed(seed)
+                bkw2_copy = dict(bkw2)
+                if "callbacks" in bkw2_copy:
+                    bkw2_copy["callbacks"]=[cb for cb in [_make_es()] if cb]
+                ms=cls(**{**bkw2_copy,"random_state":seed}); ms.fit(Xtrva_n,ytrva_sc)
                 yps=ysc.inverse_transform(ms.predict(Xte_n).reshape(-1,1)).ravel()
                 m_,_,r_,mp_,_,_=compute_metrics(yte,yps,ytrva)
                 seed_results[name]["MAE"].append(m_); seed_results[name]["RMSE"].append(r_)
                 seed_results[name]["MAPE(%)"].append(mp_)
+                is_table3 = (seed == RANDOM_SEED)
                 seed_results[name].setdefault("_rows",[]).append(
-                    {"model":disp(name),"seed":seed,"RMSE":r_,"MAE":m_,"MAPE(%)":mp_})
-                print(f"    seed={seed}: RMSE={r_:.2f}  MAE={m_:.2f}")
+                    {"model":disp(name),"seed":seed,"RMSE":r_,"MAE":m_,"MAPE(%)":mp_,
+                     "is_table3_seed": is_table3})
+                marker = " <- Table III seed" if is_table3 else ""
+                print(f"    seed={seed}: RMSE={r_:.2f}  MAE={m_:.2f}{marker}")
             except Exception as e: print(f"    seed={seed}: {e}")
     print(f"\n  {disp(name)} done.")
 
