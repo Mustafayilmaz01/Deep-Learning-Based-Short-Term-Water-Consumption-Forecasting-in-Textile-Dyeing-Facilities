@@ -32,21 +32,13 @@ from sklearn.preprocessing import MinMaxScaler
 warnings.filterwarnings("ignore")
 
 # ── Reproducibility ───────────────────────────────────────────────────────────
-# Multi-seed mode: tüm modeller 1-10 arası seedlerle çalışır,
-# nihai metrikler bu seedlerin ortalamasıyla raporlanır.
-RANDOM_SEED = 1   # HP tuning ve ilk referans seed (seed=1 kullanılır)
-SEEDS = list(range(1, 31))   # [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-
-def set_all_seeds(seed):
-    np.random.seed(seed); _random.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    try:
-        import tensorflow as _tf2; _tf2.random.set_seed(seed)
-    except Exception: pass
-
-set_all_seeds(RANDOM_SEED)
+RANDOM_SEED = 42
+np.random.seed(RANDOM_SEED); _random.seed(RANDOM_SEED)
+os.environ["PYTHONHASHSEED"] = str(RANDOM_SEED)
 try:
-    import tensorflow as _tf; _tf.get_logger().setLevel("ERROR")
+    import tensorflow as _tf; _tf.random.set_seed(RANDOM_SEED)
+    # Also suppress TF Python-level warnings
+    _tf.get_logger().setLevel("ERROR")
 except Exception:
     pass
 
@@ -69,7 +61,8 @@ ES_MIN_DELTA  = 1e-4
 ES_MAX_EPOCHS = 100
 N_BOOTSTRAP   = 1000
 CI_LEVEL      = 0.95
-N_SEEDS       = 10          # SEEDS listesi otomatik olarak 1-10 arası
+N_SEEDS       = 5
+SEEDS         = [42, 123, 7, 99, 2024]
 RUN_WALK_FORWARD = False
 N_WF_FOLDS       = 6
 
@@ -187,7 +180,7 @@ def split_from_meta(n, meta):
 # ═════════════════════════════════════════════════════════════════════════════
 def bootstrap_ci(y_true, y_pred, n=1000, ci=0.95):
     res = y_true - y_pred; a = 1 - ci
-    rng = np.random.default_rng(1)   # CI hesabı için sabit seed
+    rng = np.random.default_rng(RANDOM_SEED)
     boots = np.array([y_pred + rng.choice(res, size=len(y_pred), replace=True) for _ in range(n)])
     return np.percentile(boots, 100*a/2, axis=0), np.percentile(boots, 100*(1-a/2), axis=0)
 
@@ -255,9 +248,7 @@ def fit_capture(model, X, y, val_data=None):
             Xv, yv = val_data
             try:
                 import tensorflow as tf
-                # Mevcut seed'i kullan (çağıran tarafından set edilmiş olmalı)
-                _cur_seed = int(os.environ.get("PYTHONHASHSEED", str(RANDOM_SEED)))
-                tf.random.set_seed(_cur_seed)
+                tf.random.set_seed(RANDOM_SEED)
                 # Modeli klonla: weights + optimizer momentumları tamamen sıfırlanır
                 new_km = tf.keras.models.clone_model(km)
                 # Optimizer'ı sıfırdan derle (eski momentumları siler)
@@ -626,6 +617,10 @@ def run_rf(Xtr, ytr, Xte, rs=42):
     # Small-sample regularization: max_depth + min_samples_leaf prevent overfitting
     # on limited training data (n=120). See Probst et al. (2019) for RF tuning guidance.
     m=RandomForestRegressor(
+        n_estimators=100,
+        max_depth=5,
+        min_samples_leaf=5,
+        max_features=0.5,
         random_state=rs, n_jobs=-1
     )
     m.fit(Xtr.reshape(len(Xtr),-1),ytr); return m.predict(Xte.reshape(len(Xte),-1))
@@ -636,6 +631,10 @@ def run_xgb(Xtr, ytr, Xte, rs=42):
         # Small-sample regularization: reduced depth + L1/L2 penalties
         # prevent memorization on limited training data (n=120).
         m=xgb.XGBRegressor(
+            n_estimators=100, learning_rate=0.05,
+            max_depth=2, min_child_weight=5,
+            subsample=0.8, colsample_bytree=0.8,
+            reg_lambda=2.0, reg_alpha=0.1,
             random_state=rs, verbosity=0
         )
         m.fit(Xtr.reshape(len(Xtr),-1),ytr); return m.predict(Xte.reshape(len(Xte),-1))
@@ -664,9 +663,13 @@ def tune_model(cls, base_kw, grid, Xtr, ytr_sc, yscaler, name, Xva, yva_sc, Xtrv
             if "callbacks" in kw: kw["callbacks"]=[cb for cb in [_make_es()] if cb]
             try:
                 # ── Her HP denemesi aynı başlangıç koşulunda değerlendirilsin ──
-                # HP farkı ölçülür, rastlantısallık değil (reproducible tuning)
-                # Tuning için sabit olarak RANDOM_SEED (=1) kullanılır
-                set_all_seeds(RANDOM_SEED)
+                # Böylece HP farkı ölçülür, rastlantısallık değil (reproducible tuning)
+                try:
+                    import tensorflow as _tf_tune
+                    _tf_tune.random.set_seed(RANDOM_SEED)
+                except Exception: pass
+                np.random.seed(RANDOM_SEED)
+                _random.seed(RANDOM_SEED)
                 # ────────────────────────────────────────────────────────────────
                 print(f"    {pn}={v} ...", end=" ", flush=True)
                 m=cls(**kw); t0=time.time()
@@ -681,8 +684,13 @@ def tune_model(cls, base_kw, grid, Xtr, ytr_sc, yscaler, name, Xva, yva_sc, Xtrv
                     best_score=rmse; best_params={pn:v}
                     kw2=dict(kw)
                     if "callbacks" in kw2: kw2["callbacks"]=[cb for cb in [_make_es()] if cb]
-                    # ── Tuning referans modeli seed=RANDOM_SEED (=1) ile fit edilir ──
-                    set_all_seeds(RANDOM_SEED)
+                    # ── Seed sabitlenir: final model Table III ile tutarlı olsun ──
+                    try:
+                        import tensorflow as _tf2
+                        _tf2.random.set_seed(RANDOM_SEED)
+                    except Exception: pass
+                    np.random.seed(RANDOM_SEED)
+                    _random.seed(RANDOM_SEED)
                     # ─────────────────────────────────────────────────────────────
                     t0=time.time(); bc=cls(**{**kw2,"random_state":RANDOM_SEED})
                     h_f = fit_capture(bc, Xtrva, ytrva_sc, val_data=None)
@@ -767,14 +775,7 @@ def _import_inception():
 def _save_model_results(name, ytr, yva, yte, yp_val, yp_test,
                         train_t, inf_t, ts_tr, ts_va, ts_te,
                         results, val_results, all_predictions, all_val_predictions,
-                        all_ci, all_ci_val, outdir, is_baseline=False,
-                        precomputed_test_metrics=None, precomputed_val_metrics=None):
-    """
-    precomputed_test_metrics / precomputed_val_metrics:
-        dict(MAE, MSE, RMSE, MAPE(%), MASE, RMSSE) — seed ortalaması metrikleri.
-        Verilirse compute_metrics() çağrılmaz; bunlar CSV/tablolara yazılır.
-        yp_test / yp_val hâlâ grafikler için (ortalama tahmin vektörü) kullanılır.
-    """
+                        all_ci, all_ci_val, outdir, is_baseline=False):
     sub = "baseline_results" if is_baseline else "time_series_plots"
     mc  = pj(outdir, "baseline_results" if is_baseline else "model_comparisons")
 
@@ -785,26 +786,8 @@ def _save_model_results(name, ytr, yva, yte, yp_val, yp_test,
     if yp_val is not None:
         all_val_predictions[name]=yp_val; all_ci_val[name]=(ci_lo_v,ci_hi_v)
 
-    # ── Metrikler: seed ortalaması verilmişse onu kullan, yoksa vektörden hesapla ──
-    if precomputed_val_metrics is not None:
-        mae_v  = precomputed_val_metrics["MAE"]
-        mse_v  = precomputed_val_metrics["MSE"]
-        rmse_v = precomputed_val_metrics["RMSE"]
-        mape_v = precomputed_val_metrics["MAPE(%)"]
-        mase_v = precomputed_val_metrics["MASE"]
-        rmsse_v= precomputed_val_metrics["RMSSE"]
-    else:
-        mae_v,mse_v,rmse_v,mape_v,mase_v,rmsse_v = compute_metrics(yva,yp_val,ytr) if yp_val is not None else (np.nan,)*6
-
-    if precomputed_test_metrics is not None:
-        mae  = precomputed_test_metrics["MAE"]
-        mse  = precomputed_test_metrics["MSE"]
-        rmse = precomputed_test_metrics["RMSE"]
-        mape = precomputed_test_metrics["MAPE(%)"]
-        mase = precomputed_test_metrics["MASE"]
-        rmsse= precomputed_test_metrics["RMSSE"]
-    else:
-        mae,mse,rmse,mape,mase,rmsse = compute_metrics(yte,yp_test,np.concatenate([ytr,yva]))
+    mae_v,mse_v,rmse_v,mape_v,mase_v,rmsse_v = compute_metrics(yva,yp_val,ytr) if yp_val is not None else (np.nan,)*6
+    mae,mse,rmse,mape,mase,rmsse = compute_metrics(yte,yp_test,np.concatenate([ytr,yva]))
 
     val_results.append({"model":name,"MAE":mae_v,"MSE":mse_v,"RMSE":rmse_v,"MAPE(%)":mape_v,
                         "MASE":mase_v,"RMSSE":rmsse_v,"Training_Time_s":train_t,"Inference_Time_s":inf_t})
@@ -888,20 +871,17 @@ models = {
                                            random_state=RANDOM_SEED,verbose=False,callbacks=[_make_es()])},
 }
 
-section("TRAINING & HYPERPARAMETER SELECTION  [Multi-seed: seeds 1-10]")
+section("TRAINING & HYPERPARAMETER SELECTION")
 results,val_results,all_predictions,all_val_predictions = [],[],{},{}
 train_times,infer_times,all_ci,all_ci_val = {},{},{},{}
 all_histories,best_params_log,all_tune_res = {},{},{}
 param_counts,seed_results = {},{nm:{"MAE":[],"RMSE":[],"MAPE(%)":[]} for nm in models}
-# Seed ortalamasından oluşturulan "averaged" tahminler (plot için)
-seed_preds_accumulator = {nm: [] for nm in models}   # her seed'in yp_test'i
 tc=pj(OUTPUT_DIR,"training_curves")
 
 for name,cfg in models.items():
     cls,bkw = cfg["class"],cfg["base_kwargs"]
     section(f"Model: {disp(name)}")
 
-    # ── 1. Hiperparametre tuning (seed=RANDOM_SEED=1 ile, bir kez) ──────────
     model,best_p,tune_res,tr_t = tune_model(
         cls,bkw,param_grids[name],Xtr_n,ytr_sc,ysc,name,Xva_n,yva_sc,Xtrva_n,ytrva_sc)
 
@@ -912,244 +892,75 @@ for name,cfg in models.items():
     h=getattr(model,"_captured_history",None) or _get_history(model)
     if h: all_histories[name]=h; plot_epoch_loss(h,name,tc)
 
+    t0=time.time()
+    yp_val_sc=model.predict(Xva_n); inf_v=time.time()-t0
+    if np.isnan(yp_val_sc).any(): print("  [WARN] NaN val – skipped"); continue
+    yp_val=ysc.inverse_transform(yp_val_sc.reshape(-1,1)).ravel()
+
+    t0=time.time()
+    yp_te_sc=model.predict(Xte_n); infer_times[name]=time.time()-t0
+    if np.isnan(yp_te_sc).any(): print("  [WARN] NaN test – skipped"); continue
+    yp_test=ysc.inverse_transform(yp_te_sc.reshape(-1,1)).ravel()
+
     pc=count_params(model)
     if pc: param_counts[name]=pc; print(f"  Trainable params: {pc:,}")
 
-    # ── 2. Multi-seed: tüm modeller için SEEDS=[1..10] üzerinde döngü ───────
-    bkw2 = {**bkw, **best_p}
-    print(f"\n  Multi-seed run (best_params={best_p}, seeds={SEEDS})...")
-    for seed in SEEDS:
-        try:
-            set_all_seeds(seed)
-            bkw2_copy = dict(bkw2)
-            if "callbacks" in bkw2_copy:
-                bkw2_copy["callbacks"] = [cb for cb in [_make_es()] if cb]
-            ms = cls(**{**bkw2_copy, "random_state": seed})
-            ms.fit(Xtrva_n, ytrva_sc)
+    _save_model_results(name,ytr,yva,yte,yp_val,yp_test,tr_t,infer_times[name],
+                        ts_tr,ts_va,ts_te,results,val_results,all_predictions,
+                        all_val_predictions,all_ci,all_ci_val,OUTPUT_DIR)
 
-            # Validation tahmini (seed=1 referans için)
-            if seed == RANDOM_SEED:
-                yp_val_sc = ms.predict(Xva_n)
-                if not np.isnan(yp_val_sc).any():
-                    yp_val_ref = ysc.inverse_transform(yp_val_sc.reshape(-1,1)).ravel()
-                else:
-                    yp_val_ref = None
-
-            yp_te_sc = ms.predict(Xte_n)
-            if np.isnan(yp_te_sc).any():
-                print(f"    seed={seed}: NaN test – atlandı"); continue
-            yp_s = ysc.inverse_transform(yp_te_sc.reshape(-1,1)).ravel()
-            seed_preds_accumulator[name].append(yp_s)
-
-            m_, _, r_, mp_, mase_, rmsse_ = compute_metrics(yte, yp_s, ytrva)
-            seed_results[name]["MAE"].append(m_)
-            seed_results[name]["RMSE"].append(r_)
-            seed_results[name]["MAPE(%)"].append(mp_)
-            seed_results[name].setdefault("_rows", []).append(
-                {"model": disp(name), "seed": seed,
-                 "RMSE": r_, "MAE": m_, "MAPE(%)": mp_,
-                 "MASE": mase_, "RMSSE": rmsse_})
-            print(f"    seed={seed}: RMSE={r_:.2f}  MAE={m_:.2f}  MAPE={mp_:.4f}%")
-        except Exception as e:
-            print(f"    seed={seed}: HATA – {e}")
-
-    # ── 3. Ortalama tahmin: tüm seedlerin yp_test ortalaması ────────────────
-    preds_list = seed_preds_accumulator[name]
-    if not preds_list:
-        print(f"  [WARN] {disp(name)}: hiçbir seed başarılı olmadı, atlandı."); continue
-
-    yp_test_avg = np.mean(preds_list, axis=0)   # seed ortalaması
-
-    # Validation için seed=1 referans; başarısızsa ilk seed kullanılır
-    if seed == RANDOM_SEED and 'yp_val_ref' in dir() and yp_val_ref is not None:
-        yp_val_avg = yp_val_ref
-    else:
-        # Val tahmini de seed=1 modeli ile yapılır (zaten tune_model içinde)
-        try:
-            set_all_seeds(RANDOM_SEED)
-            bkw_val = dict(bkw2)
-            if "callbacks" in bkw_val:
-                bkw_val["callbacks"] = [cb for cb in [_make_es()] if cb]
-            m_val = cls(**{**bkw_val, "random_state": RANDOM_SEED})
-            m_val.fit(Xtr_n, ytr_sc)
-            yp_val_sc2 = m_val.predict(Xva_n)
-            yp_val_avg = ysc.inverse_transform(yp_val_sc2.reshape(-1,1)).ravel() if not np.isnan(yp_val_sc2).any() else None
-        except Exception:
-            yp_val_avg = None
-
-    infer_times[name] = 0.0   # multi-seed ortalaması için anlamlı değil
-
-    # ── Seed ortalaması metrikler (her seed başına hesaplanmış değerlerin ortalaması) ──
-    def _nanmean(lst): return float(np.nanmean(lst)) if lst else np.nan
-    def _nanmean_mse(rmse_list): return float(np.nanmean(np.array(rmse_list)**2)) if rmse_list else np.nan
-
-    sr_te = seed_results[name]
-    te_metrics = {
-        "MAE":     _nanmean(sr_te["MAE"]),
-        "MSE":     _nanmean_mse(sr_te["RMSE"]),
-        "RMSE":    _nanmean(sr_te["RMSE"]),
-        "MAPE(%)": _nanmean(sr_te["MAPE(%)"]),
-        "MASE":    _nanmean([r["MASE"]   for r in sr_te.get("_rows",[]) if not np.isnan(r.get("MASE",  np.nan))]),
-        "RMSSE":   _nanmean([r["RMSSE"]  for r in sr_te.get("_rows",[]) if not np.isnan(r.get("RMSSE", np.nan))]),
-    }
-
-    # Val metrikleri: seed=1 ile Xtr→Xva üzerinde hesapla (deterministik referans)
-    val_metrics = None
-    if yp_val_avg is not None:
-        try:
-            set_all_seeds(RANDOM_SEED)
-            bkw_vmet = dict(bkw2)
-            if "callbacks" in bkw_vmet:
-                bkw_vmet["callbacks"] = [cb for cb in [_make_es()] if cb]
-            mv = cls(**{**bkw_vmet, "random_state": RANDOM_SEED})
-            mv.fit(Xtr_n, ytr_sc)
-            yp_vs_all = []
-            for sv in SEEDS:
-                try:
-                    set_all_seeds(sv)
-                    bkw_vs = dict(bkw2)
-                    if "callbacks" in bkw_vs:
-                        bkw_vs["callbacks"] = [cb for cb in [_make_es()] if cb]
-                    mvs = cls(**{**bkw_vs, "random_state": sv})
-                    mvs.fit(Xtr_n, ytr_sc)
-                    yp_v_s = mvs.predict(Xva_n)
-                    if not np.isnan(yp_v_s).any():
-                        yp_vs_all.append(ysc.inverse_transform(yp_v_s.reshape(-1,1)).ravel())
-                except Exception:
-                    pass
-            if yp_vs_all:
-                val_mae_l, val_mse_l, val_rmse_l, val_mape_l, val_mase_l, val_rmsse_l = [], [], [], [], [], []
-                for yp_v_i in yp_vs_all:
-                    vm_, vmse_, vr_, vmp_, vmas_, vrms_ = compute_metrics(yva, yp_v_i, ytr)
-                    val_mae_l.append(vm_); val_mse_l.append(vmse_); val_rmse_l.append(vr_)
-                    val_mape_l.append(vmp_); val_mase_l.append(vmas_); val_rmsse_l.append(vrms_)
-                val_metrics = {
-                    "MAE":     _nanmean(val_mae_l),
-                    "MSE":     _nanmean(val_mse_l),
-                    "RMSE":    _nanmean(val_rmse_l),
-                    "MAPE(%)": _nanmean(val_mape_l),
-                    "MASE":    _nanmean([v for v in val_mase_l if not np.isnan(v)]),
-                    "RMSSE":   _nanmean([v for v in val_rmsse_l if not np.isnan(v)]),
-                }
-        except Exception as e:
-            print(f"  [WARN] val multi-seed metrikleri hesaplanamadı: {e}")
-
-    _save_model_results(name, ytr, yva, yte, yp_val_avg, yp_test_avg, tr_t, infer_times[name],
-                        ts_tr, ts_va, ts_te, results, val_results, all_predictions,
-                        all_val_predictions, all_ci, all_ci_val, OUTPUT_DIR,
-                        precomputed_test_metrics=te_metrics,
-                        precomputed_val_metrics=val_metrics)
-    print(f"\n  {disp(name)} done  (ortalama {len(preds_list)} seed üzerinden).")
+    if name in {"LSTMFCNRegressor","InceptionTime"} and N_SEEDS>1:
+        bkw2={**bkw,**best_p}
+        # RANDOM_SEED zaten Table III final modeli ile aynı seed.
+        # SEEDS listesinde yoksa başa ekliyoruz ki tablolar tutarlı olsun.
+        seeds_to_run = SEEDS if RANDOM_SEED in SEEDS else [RANDOM_SEED] + SEEDS
+        print(f"\n  Multi-seed (best_params={best_p}, seeds={seeds_to_run})...")
+        for seed in seeds_to_run:
+            try:
+                try: import tensorflow as tf2; tf2.random.set_seed(seed)
+                except: pass
+                np.random.seed(seed); _random.seed(seed)
+                bkw2_copy = dict(bkw2)
+                if "callbacks" in bkw2_copy:
+                    bkw2_copy["callbacks"]=[cb for cb in [_make_es()] if cb]
+                ms=cls(**{**bkw2_copy,"random_state":seed}); ms.fit(Xtrva_n,ytrva_sc)
+                yps=ysc.inverse_transform(ms.predict(Xte_n).reshape(-1,1)).ravel()
+                m_,_,r_,mp_,_,_=compute_metrics(yte,yps,ytrva)
+                seed_results[name]["MAE"].append(m_); seed_results[name]["RMSE"].append(r_)
+                seed_results[name]["MAPE(%)"].append(mp_)
+                is_table3 = (seed == RANDOM_SEED)
+                seed_results[name].setdefault("_rows",[]).append(
+                    {"model":disp(name),"seed":seed,"RMSE":r_,"MAE":m_,"MAPE(%)":mp_,
+                     "is_table3_seed": is_table3})
+                marker = " <- Table III seed" if is_table3 else ""
+                print(f"    seed={seed}: RMSE={r_:.2f}  MAE={m_:.2f}{marker}")
+            except Exception as e: print(f"    seed={seed}: {e}")
+    print(f"\n  {disp(name)} done.")
 
 if all_histories: plot_training_curves_combined(all_histories,tc)
 
-section("BASELINE MODELS  [RF & XGBoost multi-seed, istatistiksel modeller deterministik]")
-# Deterministik baseline'lar (seed etkisiz): bir kez çalıştır
-det_bl_fns = {
-    "Naive":        (lambda: run_naive(ytrva,yte),        lambda: run_naive(ytr,yva)),
-    "SeasonalNaive":(lambda: run_snaive(ytrva,yte),       lambda: run_snaive(ytr,yva)),
-    "ARIMA":        (lambda: run_arima(ytrva,yte),         lambda: run_arima(ytr,yva)),
-    "SARIMA":       (lambda: run_sarima(ytrva,yte),        lambda: run_sarima(ytr,yva)),
+section("BASELINE MODELS")
+bl_fns = {
+    "Naive":        (lambda: run_naive(ytrva,yte),       lambda: run_naive(ytr,yva)),
+    "SeasonalNaive":(lambda: run_snaive(ytrva,yte),      lambda: run_snaive(ytr,yva)),
+    "ARIMA":        (lambda: run_arima(ytrva,yte),        lambda: run_arima(ytr,yva)),
+    "SARIMA":       (lambda: run_sarima(ytrva,yte),       lambda: run_sarima(ytr,yva)),
+    "RandomForest": (lambda: run_rf(Xtrva_n,ytrva,Xte_n),lambda: run_rf(Xtr_n,ytr,Xva_n)),
+    "XGBoost":      (lambda: run_xgb(Xtrva_n,ytrva,Xte_n),lambda: run_xgb(Xtr_n,ytr,Xva_n)),
 }
-for bname,(test_fn,val_fn) in det_bl_fns.items():
+for bname,(test_fn,val_fn) in bl_fns.items():
     print(f"\n  {disp(bname)} ...")
     try:
         yp_v=val_fn()
         if np.isnan(yp_v).any(): yp_v=None
         t0=time.time(); yp_t=test_fn(); bt=time.time()-t0
-        if np.isnan(yp_t).any(): print("  NaN – atlandı"); continue
+        if np.isnan(yp_t).any(): print("  NaN – skipped"); continue
         train_times[bname]=bt; infer_times[bname]=0.0
         _save_model_results(bname,ytr,yva,yte,yp_v,yp_t,bt,0.0,
                             ts_tr,ts_va,ts_te,results,val_results,all_predictions,
                             all_val_predictions,all_ci,all_ci_val,OUTPUT_DIR,is_baseline=True)
         print(f"  {disp(bname)} done.")
     except Exception as e: print(f"  ERROR: {e}")
-
-# Stokastik baseline'lar (RF, XGBoost): multi-seed ortalama
-stoch_bl = {
-    "RandomForest": {
-        "test_fn": lambda rs: run_rf(Xtrva_n, ytrva, Xte_n, rs=rs),
-        "val_fn":  lambda rs: run_rf(Xtr_n, ytr, Xva_n, rs=rs),
-    },
-    "XGBoost": {
-        "test_fn": lambda rs: run_xgb(Xtrva_n, ytrva, Xte_n, rs=rs),
-        "val_fn":  lambda rs: run_xgb(Xtr_n, ytr, Xva_n, rs=rs),
-    },
-}
-for bname, fns in stoch_bl.items():
-    print(f"\n  {disp(bname)} – multi-seed (seeds={SEEDS}) ...")
-    bl_preds_te, bl_preds_va = [], []
-    t_total = 0.0
-    # seed başına tüm metrikler
-    bl_seed_mae, bl_seed_mse, bl_seed_rmse = [], [], []
-    bl_seed_mape, bl_seed_mase, bl_seed_rmsse = [], [], []
-    bl_val_mae, bl_val_mse, bl_val_rmse, bl_val_mape, bl_val_mase, bl_val_rmsse = [], [], [], [], [], []
-
-    for seed in SEEDS:
-        try:
-            set_all_seeds(seed)
-            yp_v_s = fns["val_fn"](rs=seed)
-            t0 = time.time()
-            yp_t_s = fns["test_fn"](rs=seed)
-            t_total += time.time() - t0
-
-            if not np.isnan(yp_t_s).any():
-                bl_preds_te.append(yp_t_s)
-                # compute_metrics ile MASE/RMSSE dahil tüm metrikleri hesapla
-                # y_naive = ytrva (train+val serisi, MASE referansı)
-                m_, mse_, r_, mp_, mas_, rms_ = compute_metrics(yte, yp_t_s, ytrva)
-                bl_seed_mae.append(m_); bl_seed_mse.append(mse_); bl_seed_rmse.append(r_)
-                bl_seed_mape.append(mp_); bl_seed_mase.append(mas_); bl_seed_rmsse.append(rms_)
-                seed_results.setdefault(bname, {"MAE":[],"RMSE":[],"MAPE(%)":[]})
-                seed_results[bname]["MAE"].append(m_)
-                seed_results[bname]["RMSE"].append(r_)
-                seed_results[bname]["MAPE(%)"].append(mp_)
-                seed_results[bname].setdefault("_rows", []).append(
-                    {"model": disp(bname), "seed": seed,
-                     "RMSE": r_, "MAE": m_, "MAPE(%)": mp_,
-                     "MASE": mas_, "RMSSE": rms_})
-                print(f"    seed={seed}: RMSE={r_:.2f}  MAE={m_:.2f}  MAPE={mp_:.4f}%  MASE={mas_:.4f}  RMSSE={rms_:.4f}")
-
-            if not np.isnan(yp_v_s).any():
-                bl_preds_va.append(yp_v_s)
-                vm_, vmse_, vr_, vmp_, vmas_, vrms_ = compute_metrics(yva, yp_v_s, ytr)
-                bl_val_mae.append(vm_); bl_val_mse.append(vmse_); bl_val_rmse.append(vr_)
-                bl_val_mape.append(vmp_); bl_val_mase.append(vmas_); bl_val_rmsse.append(vrms_)
-        except Exception as e:
-            print(f"    seed={seed}: HATA – {e}")
-
-    if not bl_preds_te:
-        print(f"  [WARN] {disp(bname)}: hiçbir seed başarılı olmadı, atlandı."); continue
-
-    yp_t_avg = np.mean(bl_preds_te, axis=0)
-    yp_v_avg = np.mean(bl_preds_va, axis=0) if bl_preds_va else None
-    train_times[bname] = t_total; infer_times[bname] = 0.0
-
-    def _nm(lst): return float(np.nanmean([v for v in lst if not np.isnan(v)])) if any(not np.isnan(v) for v in lst) else np.nan
-
-    bl_te_metrics = {
-        "MAE":     _nm(bl_seed_mae),
-        "MSE":     _nm(bl_seed_mse),
-        "RMSE":    _nm(bl_seed_rmse),
-        "MAPE(%)": _nm(bl_seed_mape),
-        "MASE":    _nm(bl_seed_mase),
-        "RMSSE":   _nm(bl_seed_rmsse),
-    }
-    bl_val_metrics = {
-        "MAE":     _nm(bl_val_mae),
-        "MSE":     _nm(bl_val_mse),
-        "RMSE":    _nm(bl_val_rmse),
-        "MAPE(%)": _nm(bl_val_mape),
-        "MASE":    _nm(bl_val_mase),
-        "RMSSE":   _nm(bl_val_rmsse),
-    } if bl_preds_va else None
-
-    _save_model_results(bname, ytr, yva, yte, yp_v_avg, yp_t_avg, t_total, 0.0,
-                        ts_tr, ts_va, ts_te, results, val_results, all_predictions,
-                        all_val_predictions, all_ci, all_ci_val, OUTPUT_DIR, is_baseline=True,
-                        precomputed_test_metrics=bl_te_metrics,
-                        precomputed_val_metrics=bl_val_metrics)
-    print(f"  {disp(bname)} done  (ortalama {len(bl_preds_te)} seed üzerinden).")
 
 section("SWEEP PLOTS  [validation only]")
 DL_CFG={k:v for k,v in models.items() if k in {"LSTMFCNRegressor","InceptionTime"}}
@@ -1206,57 +1017,14 @@ pd.DataFrame([{"model":disp(m),"type":MTYPE.get(m,"—"),
               for m in sorted(set(list(train_times)+list(infer_times)))
               ]).to_csv(pj(OUTPUT_DIR,"computation_times.csv"),index=False); print("computation_times.csv saved")
 
-# multi_seed_results.csv  – tüm modeller için seed bazlı + ortalama satırları
-def _sfv(v): return float(v) if not (isinstance(v, float) and np.isnan(v)) else np.nan
-def _smean(lst):
-    vals = [v for v in lst if v is not None and not (isinstance(v, float) and np.isnan(v))]
-    return float(np.mean(vals)) if vals else np.nan
-def _sstd(lst):
-    vals = [v for v in lst if v is not None and not (isinstance(v, float) and np.isnan(v))]
-    return float(np.std(vals)) if vals else np.nan
-
+# multi_seed_results.csv
 seed_rows=[]
-for nm, data in seed_results.items():
-    rows = data.get("_rows", [])
+for nm,data in seed_results.items():
+    rows=data.get("_rows",[])
     if not rows: continue
-    rmse_vals  = [r["RMSE"]    for r in rows]
-    mae_vals   = [r["MAE"]     for r in rows]
-    mape_vals  = [r["MAPE(%)"] for r in rows]
-    mase_vals  = [r.get("MASE",  np.nan) for r in rows]
-    rmsse_vals = [r.get("RMSSE", np.nan) for r in rows]
-    mean_r   = _smean(rmse_vals);  std_r  = _sstd(rmse_vals)
-    mean_m   = _smean(mae_vals);   std_m  = _sstd(mae_vals)
-    mean_p   = _smean(mape_vals);  std_p  = _sstd(mape_vals)
-    mean_mas = _smean(mase_vals);  std_mas= _sstd(mase_vals)
-    mean_rms = _smean(rmsse_vals); std_rms= _sstd(rmsse_vals)
-    for r in rows:
-        seed_rows.append({**r,
-                          "mean_RMSE":    round(mean_r,  4) if not np.isnan(mean_r)   else np.nan,
-                          "std_RMSE":     round(std_r,   4) if not np.isnan(std_r)    else np.nan,
-                          "mean_MAE":     round(mean_m,  4) if not np.isnan(mean_m)   else np.nan,
-                          "std_MAE":      round(std_m,   4) if not np.isnan(std_m)    else np.nan,
-                          "mean_MAPE(%)": round(mean_p,  4) if not np.isnan(mean_p)   else np.nan,
-                          "std_MAPE(%)":  round(std_p,   4) if not np.isnan(std_p)    else np.nan,
-                          "mean_MASE":    round(mean_mas,4) if not np.isnan(mean_mas) else np.nan,
-                          "mean_RMSSE":   round(mean_rms,4) if not np.isnan(mean_rms) else np.nan})
-    # MEAN özet satırı
-    seed_rows.append({"model": disp(nm), "seed": "MEAN",
-                      "RMSE":    round(mean_r,  4) if not np.isnan(mean_r)   else np.nan,
-                      "MAE":     round(mean_m,  4) if not np.isnan(mean_m)   else np.nan,
-                      "MAPE(%)": round(mean_p,  4) if not np.isnan(mean_p)   else np.nan,
-                      "MASE":    round(mean_mas,4) if not np.isnan(mean_mas) else np.nan,
-                      "RMSSE":   round(mean_rms,4) if not np.isnan(mean_rms) else np.nan,
-                      "mean_RMSE":    round(mean_r,  4) if not np.isnan(mean_r)   else np.nan,
-                      "std_RMSE":     round(std_r,   4) if not np.isnan(std_r)    else np.nan,
-                      "mean_MAE":     round(mean_m,  4) if not np.isnan(mean_m)   else np.nan,
-                      "std_MAE":      round(std_m,   4) if not np.isnan(std_m)    else np.nan,
-                      "mean_MAPE(%)": round(mean_p,  4) if not np.isnan(mean_p)   else np.nan,
-                      "std_MAPE(%)":  round(std_p,   4) if not np.isnan(std_p)    else np.nan,
-                      "mean_MASE":    round(mean_mas,4) if not np.isnan(mean_mas) else np.nan,
-                      "mean_RMSSE":   round(mean_rms,4) if not np.isnan(mean_rms) else np.nan})
-if seed_rows:
-    pd.DataFrame(seed_rows).to_csv(pj(OUTPUT_DIR,"multi_seed_results.csv"),index=False)
-    print("multi_seed_results.csv saved")
+    mean_r=float(np.mean([r["RMSE"] for r in rows]))
+    for r in rows: seed_rows.append({**r,"mean_RMSE":round(mean_r,2)})
+if seed_rows: pd.DataFrame(seed_rows).to_csv(pj(OUTPUT_DIR,"multi_seed_results.csv"),index=False); print("multi_seed_results.csv saved")
 
 json.dump(best_params_log,open(pj(OUTPUT_DIR,"best_hyperparameters.json"),"w"),indent=2)
 json.dump({mn:{pn:{"values":[float(v) for v in d["values"]],
@@ -1267,8 +1035,7 @@ json.dump({mn:{pn:{"values":[float(v) for v in d["values"]],
 
 def _fmv(v): return "N/A" if (isinstance(v,float) and np.isnan(v)) else f"{v:.3f}"
 section("SUMMARY")
-print(f"Final window: W={FINAL_WINDOW}  |  Seeds: {SEEDS}  |  Output: {OUTPUT_DIR}/")
-print(f"Metrikler {len(SEEDS)} seed ortalaması üzerinden hesaplanmıştır (seed 1-10).\n")
+print(f"Final window: W={FINAL_WINDOW}  |  Seed: {RANDOM_SEED}  |  Output: {OUTPUT_DIR}/\n")
 print("="*90)
 print("VALIDATION PERFORMANCE (sorted by RMSE):")
 print("="*90)
@@ -1282,22 +1049,3 @@ for i,(_,row) in enumerate(res_df.iterrows(),1):
     print(f"{i:2}. {disp(row['model']):<18} RMSE={row['RMSE']:.2f}  MAE={row['MAE']:.2f}  "
           f"MAPE={row['MAPE(%)']:.4f}%  MASE={_fmv(row['MASE'])}  RMSSE={_fmv(row['RMSSE'])}  "
           f"TrainT={row['Training_Time_s']:.2f}s")
-
-# ── Multi-seed ortalama özet tablosu ─────────────────────────────────────────
-print("\n"+"="*110)
-print(f"MULTI-SEED ORTALAMA (seeds={SEEDS}):")
-print("="*110)
-print(f"{'Model':<20} {'Mean RMSE':>10} {'Std RMSE':>9} {'Mean MAE':>10} {'Mean MAPE(%)':>13} {'Mean MASE':>10} {'Mean RMSSE':>11} {'N':>4}")
-print("-"*110)
-for nm, data in seed_results.items():
-    rows = data.get("_rows", [])
-    if not rows: continue
-    def _col(key): return [r.get(key, np.nan) for r in rows if not (isinstance(r.get(key, np.nan), float) and np.isnan(r.get(key, np.nan)))]
-    rmse_v = _col("RMSE"); mae_v = _col("MAE"); mape_v = _col("MAPE(%)")
-    mase_v = _col("MASE"); rmsse_v = _col("RMSSE")
-    if not rmse_v: continue
-    def _fmt(lst): return f"{np.mean(lst):>10.4f}" if lst else f"{'N/A':>10}"
-    print(f"{disp(nm):<20} {np.mean(rmse_v):>10.2f} {np.std(rmse_v):>9.2f} "
-          f"{np.mean(mae_v) if mae_v else float('nan'):>10.2f} "
-          f"{np.mean(mape_v) if mape_v else float('nan'):>13.4f}"
-          f"{_fmt(mase_v)}{_fmt(rmsse_v)} {len(rmse_v):>4}")

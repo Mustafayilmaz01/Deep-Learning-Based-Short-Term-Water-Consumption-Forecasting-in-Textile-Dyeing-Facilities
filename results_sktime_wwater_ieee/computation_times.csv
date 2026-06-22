@@ -1,10 +1,10 @@
 model,type,training_time_s,inference_time_s
-ARIMA,Statistical,1.133,<0.001
-InceptionTime,Deep learning,96.893,0.450
-LSTM-FCN,Deep learning,69.256,0.247
+ARIMA,Statistical,0.938,<0.001
+InceptionTime,Deep learning,102.408,<0.001
+LSTM-FCN,Deep learning,62.697,<0.001
 Naive,Statistical,<0.001,<0.001
-Random Forest,ML ensemble,0.105,<0.001
-ROCKET,Kernel DL (no GPU),15.389,0.217
-SARIMA,Statistical,1.205,<0.001
+Random Forest,ML ensemble,3.465,<0.001
+ROCKET,Kernel DL (no GPU),14.620,<0.001
+SARIMA,Statistical,1.260,<0.001
 Seasonal Naive,Statistical,<0.001,<0.001
-XGBoost,ML ensemble,0.020,<0.001
+XGBoost,ML ensemble,2.574,<0.001
