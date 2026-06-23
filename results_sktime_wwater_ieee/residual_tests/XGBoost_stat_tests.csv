@@ -1,2 +1,2 @@
 model,ljung_box_stat_lag5,ljung_box_pvalue_lag5,autocorrelation_ok
-XGBoost,6.500889417739164,0.26048246606408126,True
+XGBoost,2.8133910375938163,0.7287285632613116,True

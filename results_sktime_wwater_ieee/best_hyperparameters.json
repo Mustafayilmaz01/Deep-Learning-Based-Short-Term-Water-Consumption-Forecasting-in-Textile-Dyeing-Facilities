@@ -3,9 +3,9 @@
     "num_kernels": 1000
   },
   "LSTMFCNRegressor": {
-    "lstm_size": 4
+    "lstm_size": 16
   },
   "InceptionTime": {
-    "batch_size": 16
+    "n_filters": 16
   }
 }
