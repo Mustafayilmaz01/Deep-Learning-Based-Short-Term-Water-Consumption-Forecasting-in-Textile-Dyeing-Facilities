@@ -65,7 +65,7 @@ MTYPE = {
     "InceptionTime":   "Deep learning",      "Naive": "Statistical",
     "SeasonalNaive":   "Statistical",        "ARIMA": "Statistical",
     "SARIMA":          "Statistical",        "RandomForest": "ML ensemble",
-    "XGBoost":         "ML ensemble",
+    "XGBoost":         "ML ensemble",        "DecisionTree": "ML tree",
 }
 
 for sub in ["", "hyperparameter_plots", "model_comparisons", "time_series_plots",
@@ -343,6 +343,22 @@ def run_xgb(Xtr, ytr, Xte, rs=42):
         return m.predict(Xte.reshape(len(Xte), -1))
     except Exception: return np.full(len(ytr), np.nan)
 
+def run_dt(Xtr, ytr, Xte, rs=42):
+    from sklearn.tree import DecisionTreeRegressor
+    from sklearn.model_selection import GridSearchCV
+    param_grid = {
+        "max_depth":       [3, 5, 7, 10, None],
+        "min_samples_leaf": [1, 3, 5, 10],
+        "max_features":    ["sqrt", "log2", None],
+    }
+    base = DecisionTreeRegressor(random_state=rs)
+    gs = GridSearchCV(base, param_grid, cv=3, scoring="neg_mean_squared_error",
+                      n_jobs=-1, refit=True)
+    gs.fit(Xtr.reshape(len(Xtr), -1), ytr)
+    best = gs.best_estimator_
+    print(f"    DT best params: {gs.best_params_}")
+    return best.predict(Xte.reshape(len(Xte), -1))
+
 # ── Model Utilities ───────────────────────────────────────────────────────────
 def count_params(model):
     for a in ("model_", "model", "network_", "clf_"):
@@ -511,7 +527,7 @@ def sweep_window(cfg, ws, rawX, rawy, train_r):
 
 def sweep_window_bl(ws, rawX, rawy, train_r):
     rd, md = {}, {}
-    for nm, fn in [("RandomForest", run_rf), ("XGBoost", run_xgb)]:
+    for nm, fn in [("RandomForest", run_rf), ("XGBoost", run_xgb), ("DecisionTree", run_dt)]:
         print(f"\n  {disp(nm)} | window: {ws}")
         rd[nm], md[nm] = _sweep_window_core(fn, {}, ws, rawX, rawy, train_r, is_bl=True)
     return rd, md
@@ -765,6 +781,8 @@ stoch_bl = {
                      "val_fn":  lambda rs: run_rf(Xtr_n,   ytr,   Xva_n, rs=rs)},
     "XGBoost":      {"test_fn": lambda rs: run_xgb(Xtrva_n, ytrva, Xte_n, rs=rs),
                      "val_fn":  lambda rs: run_xgb(Xtr_n,   ytr,   Xva_n, rs=rs)},
+    "DecisionTree": {"test_fn": lambda rs: run_dt(Xtrva_n, ytrva, Xte_n, rs=rs),
+                     "val_fn":  lambda rs: run_dt(Xtr_n,   ytr,   Xva_n, rs=rs)},
 }
 for bname, fns in stoch_bl.items():
     print(f"\n  {disp(bname)} – multi-seed (seeds={SEEDS}) ...")

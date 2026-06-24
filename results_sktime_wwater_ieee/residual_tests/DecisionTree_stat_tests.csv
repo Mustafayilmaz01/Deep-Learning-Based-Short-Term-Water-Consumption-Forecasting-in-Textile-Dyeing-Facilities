@@ -1,2 +1,2 @@
 model,ljung_box_stat_lag5,ljung_box_pvalue_lag5,autocorrelation_ok
-Random Forest,2.190916397526614,0.8221469507801007,True
+DecisionTree,4.265204606669384,0.5118984274666758,True
