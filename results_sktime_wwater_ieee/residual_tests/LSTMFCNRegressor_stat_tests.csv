@@ -1,2 +1,2 @@
 model,ljung_box_stat_lag5,ljung_box_pvalue_lag5,autocorrelation_ok
-LSTM-FCN,5.133800600616281,0.39977033544365637,True
+LSTM-FCN,6.12153223088287,0.2945723212505933,True

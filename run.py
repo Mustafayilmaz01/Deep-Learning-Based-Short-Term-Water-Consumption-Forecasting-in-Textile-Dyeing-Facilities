@@ -6,6 +6,7 @@ Tüm grafik fonksiyonları plots.py'den import edilir.
 """
 
 import os, json, logging, warnings, time, random as _random
+import traceback
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
@@ -53,9 +54,10 @@ TRAIN_RATIO, VAL_RATIO = 108 / 144, 24 / 144
 FINAL_WINDOW            = 12
 WINDOW_SIZE_CANDIDATES  = [6, 12, 18, 24, 36]
 BATCH_SIZE_CANDIDATES   = [8, 16, 32, 64]
-ES_PATIENCE   = 10
+ES_PATIENCE   = 15       # DÜZELTME: 10→15; küçük veri setinde loss dalgalanması fazla,
+                         # çok erken durmasın
 ES_MIN_DELTA  = 1e-5
-ES_MAX_EPOCHS = 100
+ES_MAX_EPOCHS = 200      # DÜZELTME: 100→200; ES zaten erken durduruyor, tavan değeri artırıldı
 N_BOOTSTRAP, CI_LEVEL = 1000, 0.95
 
 MTYPE = {
@@ -145,7 +147,7 @@ def residual_tests(y_true, y_pred, name):
     except Exception as e: out["ljung_box_error"] = str(e)
     return out
 
-# ── Keras Helpers ─────────────────────────────────────────────────────────────
+# ── Keras Helpers & Fixes ─────────────────────────────────────────────────────
 def _make_es(monitor="loss"):
     try:
         import tensorflow as tf
@@ -154,86 +156,141 @@ def _make_es(monitor="loss"):
             restore_best_weights=True, verbose=0)
     except Exception: return None
 
-def _make_reduce_lr():
+def _make_reduce_lr(monitor="val_loss"):
+    """DÜZELTME: monitor parametresi alır; val_data olmayan durumda çağrılmaz."""
     try:
         import tensorflow as tf
         return tf.keras.callbacks.ReduceLROnPlateau(
-            monitor="val_loss", factor=0.5, patience=5, min_lr=1e-6, verbose=0)
+            monitor=monitor, factor=0.5, patience=5, min_lr=1e-6, verbose=0)
     except Exception: return None
 
 def _inner_keras(m):
-    for a in ("model_", "network_", "clf_"):
+    """
+    DÜZELTME: sktime modelinin içindeki Keras modelini özyinelemeli (recursive) olarak bulur.
+    Önceki sürüm yalnızca 2 seviye derinliğe bakıyordu; InceptionTime gibi modellerde
+    Keras modeli daha derinde olabilir.
+    """
+    def _is_keras_model(obj):
+        try:
+            import tensorflow as tf
+            return isinstance(obj, tf.keras.Model)
+        except Exception:
+            return hasattr(obj, "fit") and hasattr(obj, "predict") and hasattr(obj, "compile")
+
+    # Önce doğrudan attribute'ları tara (hız için)
+    for a in ("model_", "network_", "clf_", "model", "network"):
         obj = getattr(m, a, None)
         if obj is None: continue
-        for s in ("model_", "model", "network_"):
+        if _is_keras_model(obj): return obj
+        # Bir seviye daha in
+        for s in ("model_", "model", "network_", "network"):
             km = getattr(obj, s, None)
-            if km is not None and hasattr(km, "fit") and hasattr(km, "history"): return km
-        if hasattr(obj, "fit") and hasattr(obj, "history"): return obj
-    return None
+            if km is not None and _is_keras_model(km): return km
+
+    # Özyinelemeli derin arama (maks 4 seviye)
+    def _deep_search(obj, depth=0):
+        if depth > 4 or obj is None: return None
+        if _is_keras_model(obj): return obj
+        for attr in vars(obj) if hasattr(obj, "__dict__") else []:
+            try:
+                child = getattr(obj, attr)
+                if child is obj: continue
+                result = _deep_search(child, depth + 1)
+                if result is not None: return result
+            except Exception:
+                pass
+        return None
+
+    return _deep_search(m)
 
 def _get_history(m):
-    for a in ("model_", "network_"):
-        inner = getattr(m, a, None)
-        if inner is None: continue
-        for s in ("history", "history_"):
-            h = getattr(inner, s, None)
-            if h is not None:
-                h = h.history if hasattr(h, "history") else h
-                if isinstance(h, dict) and h.get("loss"): return h
+    km = _inner_keras(m)
+    if km and hasattr(km, "history"):
+        h = getattr(km.history, "history", km.history)
+        if isinstance(h, dict): return h
     h = getattr(m, "history_", None)
     if h is not None:
         h = h.history if hasattr(h, "history") else h
         if isinstance(h, dict) and h.get("loss"): return h
     return {}
 
-def fit_capture(model, X, y, val_data=None):
+def fit_capture(model, X, y, val_data=None, best_epochs=None):
     """
-    Tek eğitim noktası. Clone/refit yok.
-    val_data verilirse: ES val_loss + ReduceLR aktif.
-    val_data yoksa: ES train loss aktif.
+    DÜZELTME özeti:
+    1) Çift transpose hatası düzeltildi: X (samples, channels, time) formatında gelir,
+       Keras'a göndermeden önce (0,2,1) ile bir kez transpose yapılır.
+    2) Final eğitimde (val_data=None) de Keras modeli çekilip train-loss ES ile eğitilir;
+       sadece sktime'ın n_epochs ayarına bırakılmaz.
     """
+    orig_epochs = getattr(model, "n_epochs", None)
+
+    # ── Model derleme: 1 epokluk dummy fit ────────────────────────────────────
+    if orig_epochs is not None:
+        model.n_epochs = 1
+    try:
+        model.fit(X, y)
+    except Exception:
+        pass
+    if orig_epochs is not None:
+        model.n_epochs = orig_epochs
+
+    km = _inner_keras(model)
+
     if val_data is not None:
         Xv, yv = val_data
-        cbs = [cb for cb in [_make_es("val_loss"), _make_reduce_lr()] if cb]
-        try: model.callbacks = cbs
-        except Exception: pass
-        try:
-            model.fit(X, y, validation_data=(Xv, yv))
-            return _get_history(model)
-        except TypeError: pass
-        model.fit(X, y)
-        km = _inner_keras(model)
         if km is not None:
             try:
                 cbs2 = [cb for cb in [_make_es("val_loss"), _make_reduce_lr()] if cb]
                 h = km.fit(
-                    np.transpose(X, (0, 2, 1)), y,
-                    epochs=getattr(model, "n_epochs", ES_MAX_EPOCHS),
+                    X.transpose(0, 2, 1), y,
+                    epochs=ES_MAX_EPOCHS,
                     batch_size=getattr(model, "batch_size", 32),
-                    validation_data=(np.transpose(Xv, (0, 2, 1)), yv),
+                    validation_data=(Xv.transpose(0, 2, 1), yv),
                     callbacks=cbs2, verbose=0,
                 )
                 return h.history
             except Exception as e:
-                print(f"  [WARN] val_loss refit failed: {e}")
-        else:
-            print(f"  [WARN] {type(model).__name__}: no Keras inner model")
-    else:
-        cbs = [cb for cb in [_make_es("loss")] if cb]
-        try: model.callbacks = cbs
-        except Exception: pass
+                print(f"  [WARN] Keras explicit fit (val) failed: {e}")
+                traceback.print_exc(limit=2)
+        # Keras modeli bulunamadıysa (Rocket vb.) — normal fit
         model.fit(X, y)
+
+    else:
+        # ── Final eğitim: train+val verisi, val yok ───────────────────────────
+        if km is not None:
+            try:
+                # Val olmadan train-loss ES kullan; overfitting riskini azaltır
+                ep = best_epochs if isinstance(best_epochs, int) else ES_MAX_EPOCHS
+                cbs_final = [cb for cb in [_make_es("loss")] if cb]
+                h = km.fit(
+                    X.transpose(0, 2, 1), y,
+                    epochs=ep,
+                    batch_size=getattr(model, "batch_size", 32),
+                    callbacks=cbs_final, verbose=0,
+                )
+                return h.history
+            except Exception as e:
+                print(f"  [WARN] Keras explicit fit (final) failed: {e}")
+                traceback.print_exc(limit=2)
+        # Keras modeli bulunamadıysa — sktime'ın kendi fit'i
+        if best_epochs is not None and orig_epochs is not None:
+            model.n_epochs = best_epochs
+        model.fit(X, y)
+
     return _get_history(model)
 
-# ── Baseline Models ───────────────────────────────────────────────────────────
-def run_naive(ytr, yte):  return np.full(len(yte), ytr[-1])
+# ── Baseline Models (Data Leakage Fixed) ──────────────────────────────────────
+def run_naive(ytr, yte):  
+    return np.full(len(yte), ytr[-1])
 
 def run_snaive(ytr, yte, s=12):
+    # Gerçek test verisini görmemesi için kendi tahminlerini history'ye ekler (Pure Multi-step)
     history, preds = list(ytr), []
-    for i in range(len(yte)):
+    for _ in range(len(yte)):
         idx = len(history) - s
-        preds.append(history[idx] if idx >= 0 else history[0])
-        history.append(yte[i])
+        pred = history[idx] if idx >= 0 else history[0]
+        preds.append(pred)
+        history.append(pred) # Data leakage düzeltildi
     return np.array(preds)
 
 def run_arima(ytr, yte):
@@ -247,29 +304,27 @@ def run_arima(ytr, yte):
                     if a < best_aic: best_aic, best_ord = a, (p, d, q)
                 except Exception: pass
     print(f"    ARIMA best order: {best_ord}")
-    hist, preds = list(ytr), []
-    for t in range(len(yte)):
-        try:    fc = ARIMA(hist, order=best_ord).fit().forecast(1)[0]
-        except: fc = hist[-1]
-        preds.append(fc); hist.append(yte[t])
-    return np.array(preds)
+    try:
+        # Multi-step forecasting (Data leakage düzeltildi)
+        preds = ARIMA(ytr, order=best_ord).fit().forecast(steps=len(yte))
+        return np.array(preds)
+    except Exception: 
+        return np.full(len(yte), ytr[-1])
 
 def run_sarima(ytr, yte):
     try:
         from statsmodels.tsa.statespace.sarimax import SARIMAX
         from statsmodels.tsa.arima.model import ARIMA
-        hist, preds = list(ytr), []
-        for t in range(len(yte)):
-            try:
-                fc = SARIMAX(hist, order=(1,1,1), seasonal_order=(1,1,0,12),
-                             enforce_stationarity=False,
-                             enforce_invertibility=False).fit(disp=False).forecast(1)[0]
-            except:
-                try:    fc = ARIMA(hist, order=(1,1,1)).fit().forecast(1)[0]
-                except: fc = hist[-1]
-            preds.append(fc); hist.append(yte[t])
+        try:
+            m = SARIMAX(ytr, order=(1,1,1), seasonal_order=(1,1,0,12),
+                         enforce_stationarity=False,
+                         enforce_invertibility=False).fit(disp=False)
+            preds = m.forecast(steps=len(yte)) # Multi-step
+        except:
+            preds = ARIMA(ytr, order=(1,1,1)).fit().forecast(steps=len(yte))
         return np.array(preds)
-    except Exception: return np.full(len(yte), np.nan)
+    except Exception: 
+        return np.full(len(yte), np.nan)
 
 def run_rf(Xtr, ytr, Xte, rs=42):
     from sklearn.ensemble import RandomForestRegressor
@@ -317,14 +372,26 @@ param_grids = {
 }
 
 def tune_model(cls, base_kw, grid, Xtr, ytr_sc, yscaler, name, Xva, yva_sc, Xtrva, ytrva_sc):
+    """
+    DÜZELTME: Önceki sürümde her parametre için döngü ayrı çalışıp best_params
+    sıfırlanıyordu — son param öncekinin üzerine yazılıyordu.
+    Şimdi her param grubunun en iyisi kümülatif olarak biriktiriliyor.
+    """
     section(f"HYPERPARAMETER TUNING: {disp(name)}")
     print(f"  train={len(Xtr)} | val={len(Xva)}  [TEST SET NOT SEEN]")
     yva = yscaler.inverse_transform(yva_sc.reshape(-1, 1)).ravel()
     best_model, best_score, best_params, total_t, tune_res = None, np.inf, {}, 0.0, {}
+    best_ep = ES_MAX_EPOCHS
+    # current_best_params: her parametre grubundan seçilen en iyiyi birikimli tutar
+    current_best_params = {}
+
     for pn, vals in grid.items():
         print(f"\n  {pn}: {vals}"); rmse_l, mae_l = [], []
+        best_pn_score = np.inf; best_pn_val = vals[0]
         for v in vals:
-            kw = {k: w for k, w in {**base_kw, pn: v}.items() if k != "callbacks"}
+            # Önceki parametrelerin en iyi değerleriyle birlikte dene
+            kw = {k: w for k, w in {**base_kw, **current_best_params, pn: v}.items()
+                  if k != "callbacks"}
             try:
                 set_all_seeds(RANDOM_SEED)
                 print(f"    {pn}={v} ...", end=" ", flush=True)
@@ -334,24 +401,60 @@ def tune_model(cls, base_kw, grid, Xtr, ytr_sc, yscaler, name, Xva, yva_sc, Xtrv
                 ypv = yscaler.inverse_transform(m.predict(Xva).reshape(-1, 1)).ravel()
                 mae, _, rmse, _, _, _ = compute_metrics(yva, ypv)
                 rmse_l.append(rmse); mae_l.append(mae)
-                ep = len(h_t.get("loss", [])) if h_t else "?"
+
+                ep = len(h_t.get("loss", [])) if h_t else getattr(m, "n_epochs", "?")
                 print(f"val_RMSE={rmse:.2f}  val_MAE={mae:.2f}  stopped@ep={ep}")
+
+                if rmse < best_pn_score:
+                    best_pn_score = rmse; best_pn_val = v
+
                 if rmse < best_score:
-                    best_score = rmse; best_params = {pn: v}
+                    best_score = rmse
+                    best_params = {**current_best_params, pn: v}
+                    best_ep = ep if isinstance(ep, int) else ES_MAX_EPOCHS
+
                     set_all_seeds(RANDOM_SEED); t0 = time.time()
                     bc = cls(**{**{k: w for k, w in kw.items() if k != "callbacks"},
                                 "random_state": RANDOM_SEED})
-                    h_f = fit_capture(bc, Xtrva, ytrva_sc, val_data=None)
+                    h_f = fit_capture(bc, Xtrva, ytrva_sc, val_data=None, best_epochs=best_ep)
                     total_t += time.time() - t0
                     hp = h_t if (h_t and h_t.get("val_loss")) else h_f
                     if hp: bc._captured_history = hp
                     best_model = bc
             except Exception as e:
-                print(f"ERROR: {e}"); rmse_l.append(np.nan); mae_l.append(np.nan)
+                print(f"ERROR: {e}")
+                traceback.print_exc(limit=2)
+                rmse_l.append(np.nan); mae_l.append(np.nan)
+
         tune_res[pn] = {"values": vals, "rmse": rmse_l, "mae": mae_l}
-    print(f"\n  Best: {best_params}  val-RMSE: {best_score:.2f}")
+        # Bu parametrenin en iyi değerini birikimli parametrelere ekle
+        current_best_params[pn] = best_pn_val
+        print(f"  → {pn} için seçilen: {best_pn_val}  (kümülatif: {current_best_params})")
+
+    # DÜZELTME: best_score ilk parametrede kırıldıysa, sonraki parametreler için
+    # best_params güncellenmeyebilir. Döngü sonunda current_best_params (tüm param. için
+    # seçilen en iyi değerleri tutan dict) ile best_params'ı birleştiriyoruz.
+    # Ayrıca final model'i bu tam parametre setiyle yeniden eğitiyoruz.
+    full_best_params = {**best_params, **{k: v for k, v in current_best_params.items()
+                                          if k not in best_params}}
+    if full_best_params != best_params:
+        print(f"  [INFO] best_params güncellendi: {best_params} → {full_best_params}")
+        best_params = full_best_params
+        # Final modeli tam parametre setiyle yeniden eğit
+        try:
+            set_all_seeds(RANDOM_SEED)
+            full_kw = {k: w for k, w in {**base_kw, **best_params}.items() if k != "callbacks"}
+            bc2 = cls(**{**full_kw, "random_state": RANDOM_SEED})
+            h_f2 = fit_capture(bc2, Xtrva, ytrva_sc, val_data=None, best_epochs=best_ep)
+            if h_f2: bc2._captured_history = h_f2
+            best_model = bc2
+            print(f"  [INFO] Final model {full_best_params} ile yeniden eğitildi.")
+        except Exception as e:
+            print(f"  [WARN] Final model yeniden eğitimi başarısız: {e}")
+
+    print(f"\n  Best: {best_params}  val-RMSE: {best_score:.2f} (best_epochs: {best_ep})")
     print(f"  Final model: train+val={len(Xtrva)} samples")
-    return best_model, best_params, tune_res, total_t
+    return best_model, best_params, best_ep, tune_res, total_t
 
 # ── Sweep (görsel amaçlı) ─────────────────────────────────────────────────────
 def sweep_dl(cfg, pn, vals, Xtr, ytr_sc, yscaler, Xva, yva_sc):
@@ -365,7 +468,7 @@ def sweep_dl(cfg, pn, vals, Xtr, ytr_sc, yscaler, Xva, yva_sc):
             try:
                 print(f"    {pn}={v} ...", end=" ", flush=True)
                 m = c["class"](**{**bkw, pn: v})
-                fit_capture(m, Xtr, ytr_sc)
+                fit_capture(m, Xtr, ytr_sc, val_data=(Xva, yva_sc))
                 yp = yscaler.inverse_transform(m.predict(Xva).reshape(-1, 1)).ravel()
                 mae, _, rmse, _, _, _ = compute_metrics(yva, yp)
                 rl.append(rmse); ml.append(mae); print(f"RMSE={rmse:.2f}")
@@ -390,7 +493,7 @@ def _sweep_window_core(m_or_fn, bkw, ws, rawX, rawy, train_r, is_bl=False):
                 sc = MinMaxScaler()
                 ytrs = sc.fit_transform(ytr.reshape(-1, 1)).ravel()
                 m = m_or_fn(**{k: v for k, v in bkw.items() if k != "callbacks"})
-                fit_capture(m, Xn, ytrs)
+                fit_capture(m, Xn, ytrs, val_data=(Xvn, sc.transform(yva.reshape(-1,1)).ravel()))
                 yp = sc.inverse_transform(m.predict(Xvn).reshape(-1, 1)).ravel()
             mae, _, rmse, _, _, _ = compute_metrics(yva, yp)
             rl.append(rmse); ml.append(mae); print(f"    w={w}: RMSE={rmse:.2f}")
@@ -533,7 +636,11 @@ models = {
     },
     "InceptionTime": {
         "class": InceptionTimeRegressor,
-        "base_kwargs": dict(n_epochs=ES_MAX_EPOCHS, batch_size=16, n_filters=32, depth=6,
+        # DÜZELTME: depth=6 küçük veri setinde (96 örnek) aşırı derin — overfitting ve
+        # unstable training'e yol açıyor. depth=3 ile başlıyoruz; tuning zaten seçecek.
+        # lr varsayılan (0.001) küçük batch ile instabil olabiliyor; sktime bunu destekliyorsa
+        # düşük lr daha kararlı. Desteklemiyorsa ES zaten düzenler.
+        "base_kwargs": dict(n_epochs=ES_MAX_EPOCHS, batch_size=32, n_filters=32, depth=3,
                             use_residual=True, use_bottleneck=True,
                             random_state=RANDOM_SEED, verbose=False),
     },
@@ -553,7 +660,7 @@ for name, cfg in models.items():
     cls = cfg["class"]; bkw = cfg["base_kwargs"]
     section(f"Model: {disp(name)}")
 
-    model, best_p, tune_res, tr_t = tune_model(
+    model, best_p, best_ep, tune_res, tr_t = tune_model(
         cls, bkw, param_grids[name], Xtr_n, ytr_sc, ysc, name,
         Xva_n, yva_sc, Xtrva_n, ytrva_sc)
 
@@ -568,7 +675,7 @@ for name, cfg in models.items():
     if pc: param_counts[name] = pc; print(f"  Trainable params: {pc:,}")
 
     bkw2 = {k: v for k, v in {**bkw, **best_p}.items() if k != "callbacks"}
-    print(f"\n  Multi-seed run (best_params={best_p}, seeds={SEEDS})...")
+    print(f"\n  Multi-seed run (best_params={best_p}, best_epochs={best_ep}, seeds={SEEDS})...")
     test_preds_list, val_preds_list = [], []
 
     for seed in SEEDS:
@@ -582,7 +689,7 @@ for name, cfg in models.items():
                 val_preds_list.append(ysc.inverse_transform(yp_va_sc.reshape(-1, 1)).ravel())
 
             ms_test = cls(**kw_s)
-            fit_capture(ms_test, Xtrva_n, ytrva_sc, val_data=None)
+            fit_capture(ms_test, Xtrva_n, ytrva_sc, val_data=None, best_epochs=best_ep)
             yp_te_sc = ms_test.predict(Xte_n)
             if np.isnan(yp_te_sc).any():
                 print(f"    seed={seed}: NaN test – atlandı"); continue
@@ -599,6 +706,7 @@ for name, cfg in models.items():
             print(f"    seed={seed}: RMSE={r_:.2f}  MAE={m_:.2f}  MAPE={mp_:.4f}%")
         except Exception as e:
             print(f"    seed={seed}: HATA – {e}")
+            traceback.print_exc(limit=2)
 
     if not test_preds_list:
         print(f"  [WARN] {disp(name)}: hiçbir seed başarılı olmadı, atlandı."); continue
@@ -647,7 +755,9 @@ for bname, (test_fn, val_fn) in det_bl_fns.items():
                             all_predictions, all_val_predictions,
                             all_ci, all_ci_val, OUTPUT_DIR, is_baseline=True)
         print(f"  {disp(bname)} done.")
-    except Exception as e: print(f"  ERROR: {e}")
+    except Exception as e: 
+        print(f"  ERROR: {e}")
+        traceback.print_exc(limit=2)
 
 # ── Baseline: Stokastik ───────────────────────────────────────────────────────
 stoch_bl = {
@@ -676,7 +786,9 @@ for bname, fns in stoch_bl.items():
                     "RMSE": r_, "MAE": m_, "MAPE(%)": mp_, "MASE": mas_, "RMSSE": rms_})
                 print(f"    seed={seed}: RMSE={r_:.2f}  MAE={m_:.2f}  MAPE={mp_:.4f}%")
             if not np.isnan(yp_v_s).any(): bl_va.append(yp_v_s)
-        except Exception as e: print(f"    seed={seed}: HATA – {e}")
+        except Exception as e: 
+            print(f"    seed={seed}: HATA – {e}")
+            traceback.print_exc(limit=2)
 
     if not bl_te: print(f"  [WARN] {disp(bname)}: hiçbir seed başarılı olmadı."); continue
 

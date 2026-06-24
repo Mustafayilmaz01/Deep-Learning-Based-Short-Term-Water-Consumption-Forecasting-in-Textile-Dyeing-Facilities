@@ -1,2 +1,2 @@
 model,ljung_box_stat_lag5,ljung_box_pvalue_lag5,autocorrelation_ok
-SARIMA,7.551116296590441,0.18277142832947862,True
+SARIMA,3.77127458742261,0.5827938822502403,True

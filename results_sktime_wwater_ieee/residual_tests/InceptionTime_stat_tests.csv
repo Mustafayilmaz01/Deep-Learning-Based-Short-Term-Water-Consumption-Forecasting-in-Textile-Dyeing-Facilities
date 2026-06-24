@@ -1,2 +1,2 @@
 model,ljung_box_stat_lag5,ljung_box_pvalue_lag5,autocorrelation_ok
-InceptionTime,2.3235742750071235,0.8027983185793691,True
+InceptionTime,2.1915433708127594,0.8220565337504191,True
